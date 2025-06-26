@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Basket Challenge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals with Green Accent -->
+    <!-- Application Structure Plan: A multi-step, task-oriented SPA that guides the user through the game flow: 1. Welcome Screen, 2. Persona Selection, 3. Main Challenge (Market, Basket, Persona/Budget panels), 4. Final Scoring/Debrief Modal. This linear flow mirrors the described game mechanics, making it intuitive for the user to understand and complete the challenge, transforming a static game plan into an interactive learning process. -->
+    <!-- Visualization & Content Choices: Personas/Food/Deficiencies are stored in JS objects. Goal: Inform -> Use styled HTML blocks for persona/food details. Goal: Compare -> Use dynamic HTML/CSS progress bars and real-time text updates for budget/nutrient tracking vs. goals. Goal: Organize -> Use Tailwind CSS Grid for the market layout and Flexbox for the main UI structure. Goal: Relationships -> A Chart.js radar chart in the final modal visualizes the relationship between the required and achieved nutritional targets, providing a clear, summative data visualization of the user's performance. The entire app is driven by user clicks which update a central JS state object and re-render the relevant parts of the UI. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .nutrient-bar-bg { background-color: #e5e7eb; }
+        .nutrient-bar-fill { transition: width 0.3s ease-in-out; }
+        .food-card { transition: transform 0.2s, box-shadow 0.2s; }
+        .food-card:hover { transform: translateY(-4px); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s;
+        }
+        .modal-content {
+            transform: scale(0.95); transition: transform 0.3s;
+        }
+        .modal-backdrop.active {
+            opacity: 1; visibility: visible;
+        }
+        .modal-backdrop.active .modal-content {
+            transform: scale(1);
+        }
+    </style>
+</head>
+<body class="bg-stone-50 text-stone-800">
+
+    <div id="app" class="container mx-auto p-4 sm:p-6 lg:p-8">
+        
+        <!-- Welcome Screen -->
+        <div id="welcome-screen" class="text-center">
+            <h1 class="text-4xl sm:text-5xl font-bold text-emerald-700 mb-4">Health Basket Challenge</h1>
+            <p class="text-lg sm:text-xl text-stone-600 mb-6">Crafting Nutrition on a Budget: Fight Deficiencies, Build Health!</p>
+            <div class="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow-md border border-stone-200">
+                <h2 class="text-2xl font-semibold text-stone-700 mb-4">Your Mission</h2>
+                <p class="text-stone-600 mb-4">You are a community dietitian. Your mission is to create a one-day, nutritionally complete meal plan for a specific person, all while staying within a tight budget and tackling a hidden nutritional deficiency. Click below to begin the challenge!</p>
+                <button onclick="showPersonaScreen()" class="bg-emerald-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-emerald-700 transition-colors text-lg">Start Challenge</button>
+            </div>
+        </div>
+
+        <!-- Persona Selection Screen -->
+        <div id="persona-screen" class="hidden">
+            <h2 class="text-3xl font-bold text-center mb-8">Choose Your Persona</h2>
+            <div id="persona-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Persona cards will be injected here by JS -->
+            </div>
+        </div>
+
+        <!-- Main Game Screen -->
+        <div id="game-screen" class="hidden">
+            <header class="mb-6">
+                <button onclick="restartGame()" class="bg-amber-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-amber-600 transition-colors">‹ Back to Personas</button>
+            </header>
+            <main class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                <!-- Left: Market Stall -->
+                <section class="lg:col-span-4 bg-white p-4 rounded-lg shadow-md border border-stone-200">
+                    <h2 class="text-2xl font-bold mb-4">🛒 Market Stall</h2>
+                    <div id="market-items" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-4 max-h-[80vh] overflow-y-auto pr-2">
+                        <!-- Market items will be injected here -->
+                    </div>
+                </section>
+
+                <!-- Middle: Basket -->
+                <section class="lg:col-span-5 bg-white p-4 rounded-lg shadow-md border border-stone-200">
+                    <h2 class="text-2xl font-bold mb-4">🧺 Your Basket</h2>
+                    <div id="basket-items" class="min-h-[200px] space-y-3">
+                        <p class="text-stone-500 italic">Your basket is empty. Add items from the market.</p>
+                    </div>
+                </section>
+
+                <!-- Right: Persona & Analysis -->
+                <section class="lg:col-span-3 bg-white p-4 rounded-lg shadow-md border border-stone-200 space-y-6">
+                    <div>
+                        <h2 class="text-2xl font-bold mb-2" id="persona-name"></h2>
+                        <div id="persona-details" class="text-stone-600 space-y-1"></div>
+                    </div>
+                    <div class="bg-amber-100 border-l-4 border-amber-500 text-amber-800 p-4 rounded-r-lg">
+                        <h3 class="font-bold text-lg mb-2">Deficiency Puzzle</h3>
+                        <p id="deficiency-symptom" class="text-sm"></p>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-lg mb-2">Budget Tracker</h3>
+                        <div class="text-3xl font-bold" id="budget-tracker"></div>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-lg mb-3">Nutritional Analysis</h3>
+                        <div id="nutrient-analysis" class="space-y-3">
+                            <!-- Nutrient bars will be injected here -->
+                        </div>
+                    </div>
+                    <button onclick="submitPlan()" id="submit-button" class="w-full bg-emerald-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-emerald-700 disabled:bg-stone-400 transition-colors text-lg">Submit Plan</button>
+                </section>
+
+            </main>
+        </div>
+
+    </div>
+
+    <!-- Scoring Modal -->
+    <div id="scoring-modal" class="modal-backdrop">
+        <div class="modal-content bg-white w-11/12 max-w-4xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 rounded-lg shadow-xl relative">
+            <button onclick="closeModal()" class="absolute top-4 right-4 text-stone-500 hover:text-stone-800 text-2xl font-bold">&times;</button>
+            <div id="modal-content-area">
+                <!-- Modal content will be generated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const appData = {
+            personas: [
+                {
+                    id: 1,
+                    name: 'Pregnant Woman',
+                    emoji: '?',
+                    details: 'A 28-year-old in her second trimester from a low-income family.',
+                    budget: 280,
+                    needs: {
+                        'Calories': { target: 2500, unit: 'kcal' },
+                        'Protein': { target: 75, unit: 'g' },
+                        'Iron': { target: 27, unit: 'mg' },
+                        'Calcium': { target: 1000, unit: 'mg' },
+                        'Folic Acid': { target: 600, unit: 'mcg' }
+                    },
+                    deficiency: 'ironDeficiencyAnemia'
+                },
+                {
+                    id: 2,
+                    name: 'Diabetic Man',
+                    emoji: '👴',
+                    details: 'A 65-year-old with Type 2 Diabetes and Hypertension.',
+                    budget: 320,
+                    needs: {
+                        'Calories': { target: 1800, unit: 'kcal' },
+                        'Fiber': { target: 30, unit: 'g' },
+                        'Protein': { target: 60, unit: 'g' },
+                        'Healthy Fats': { target: 50, unit: 'g' }
+                    },
+                    deficiency: 'bloodSugarFluctuation'
+                },
+                {
+                    id: 3,
+                    name: 'Young Infant',
+                    emoji: '👶',
+                    details: 'A 9-month-old starting complementary feeding.',
+                    budget: 100,
+                    needs: {
+                        'Calories': { target: 800, unit: 'kcal' },
+                        'Protein': { target: 15, unit: 'g' },
+                        'Iron': { target: 11, unit: 'mg' },
+                        'Vitamin A': { target: 400, unit: 'mcg' }
+                    },
+                    deficiency: 'vitaminADeficiency'
+                },
+                {
+                    id: 6, // Corresponds to original Persona 6
+                    name: 'Growing Teenager',
+                    emoji: '👧',
+                    details: 'A 15-year-old female high school student in a Tier 2 City, in a crucial growth spurt.',
+                    budget: 220,
+                    needs: {
+                        'Calories': { target: 2200, unit: 'kcal' },
+                        'Protein': { target: 70, unit: 'g' },
+                        'Iron': { target: 18, unit: 'mg' },
+                        'Calcium': { target: 1300, unit: 'mg' },
+                        'Vitamin D': { target: 600, unit: 'IU' }
+                    },
+                    deficiency: 'boneDevelopmentIssues'
+                },
+                {
+                    id: 9, // Corresponds to original Persona 9
+                    name: 'Busy College Student',
+                    emoji: '👩‍🎓',
+                    details: 'A 20-year-old female medical student in Visakhapatnam, often relying on hostel mess food.',
+                    budget: 250,
+                    needs: {
+                        'Calories': { target: 2000, unit: 'kcal' },
+                        'Protein': { target: 60, unit: 'g' },
+                        'Fiber': { target: 20, unit: 'g' },
+                        'Omega-3s': { target: 1.1, unit: 'g' }
+                    },
+                    deficiency: 'cognitivePerformance'
+                },
+                {
+                    id: 8, // Corresponds to original Persona 8
+                    name: 'Energetic Construction Worker',
+                    emoji: '👷',
+                    details: 'A 25-year-old male migrant laborer in Hyderabad, with extremely high energy demands.',
+                    budget: 200,
+                    needs: {
+                        'Calories': { target: 3500, unit: 'kcal' },
+                        'Protein': { target: 100, unit: 'g' },
+                        'Iron': { target: 20, unit: 'mg' },
+                        'Potassium': { target: 4700, unit: 'mg' }
+                    },
+                    deficiency: 'electrolyteImbalance'
+                }
+            ],
+            deficiencies: {
+                ironDeficiencyAnemia: {
+                    symptom: 'Patient exhibits extreme fatigue, pallor, and weakness. This could indicate a common blood disorder.',
+                    nutrient: 'Iron'
+                },
+                bloodSugarFluctuation: {
+                    symptom: 'Patient experiences energy crashes after meals and difficulty managing blood sugar levels. Focus on carbohydrate quality and healthy fats.',
+                    nutrient: 'Carbohydrate Quality' // Or Healthy Fats, depending on focus
+                },
+                vitaminADeficiency: {
+                    symptom: 'Patient has vision problems in low light and dry eyes. Focus on nutrients essential for eye health.',
+                    nutrient: 'Vitamin A'
+                },
+                boneDevelopmentIssues: {
+                    symptom: 'Patient complains of bone pain and weakness, especially during growth spurts, indicating potential issues with bone density.',
+                    nutrient: 'Vitamin D'
+                },
+                cognitivePerformance: {
+                    symptom: 'Patient reports difficulty concentrating, memory issues, and overall reduced cognitive sharpness.',
+                    nutrient: 'Omega-3s'
+                },
+                electrolyteImbalance: {
+                    symptom: 'Patient, involved in heavy physical labor, experiences muscle cramps and general weakness, possibly due to excessive sweating.',
+                    nutrient: 'Potassium'
+                }
+            },
+            market: [
+                { id: 1, name: 'Rice (White)', emoji: '🍚', price: 6, per: '100g', nutrients: { 'Calories': 130, 'Protein': 2.7, 'Fiber': 0.4, 'Sodium': 1, 'Carbohydrate Quality': 0.5 } },
+                { id: 2, name: 'Toor Dal (Lentils)', emoji: '🍲', price: 12, per: '100g', nutrients: { 'Calories': 116, 'Protein': 9, 'Iron': 3.3, 'Fiber': 8, 'Magnesium': 36, 'Potassium': 363, 'Zinc': 1.3, 'Carbohydrate Quality': 0.9 } },
+                { id: 3, name: 'Spinach', emoji: '🥬', price: 5, per: '100g', nutrients: { 'Calories': 23, 'Protein': 2.9, 'Iron': 2.7, 'Vitamin A': 469, 'Vitamin C': 28, 'Calcium': 99, 'Magnesium': 79, 'Potassium': 558, 'Folic Acid': 194 } }, // Added Folic Acid
+                { id: 4, name: 'Carrots', emoji: '🥕', price: 6, per: '100g', nutrients: { 'Calories': 41, 'Fiber': 2.8, 'Vitamin A': 835, 'Sodium': 69, 'Potassium': 320 } },
+                { id: 5, name: 'Milk (Cow)', emoji: '🥛', price: 6, per: '100ml', nutrients: { 'Calories': 42, 'Protein': 3.4, 'Calcium': 125, 'Sodium': 43, 'Vitamin B12': 0.4, 'Vitamin D': 1.2, 'Potassium': 150, 'Choline': 15 } },
+                { id: 6, name: 'Jaggery', emoji: '🟫', price: 8, per: '100g', nutrients: { 'Calories': 383, 'Iron': 11, 'Carbohydrate Quality': 0.2 } },
+                { id: 7, name: 'Lemon', emoji: '🍋', price: 4, per: 'unit', nutrients: { 'Calories': 17, 'Vitamin C': 31, 'Potassium': 138 } },
+                { id: 8, name: 'Fish (Local)', emoji: '🐟', price: 20, per: '100g', nutrients: { 'Calories': 206, 'Protein': 22, 'Sodium': 61, 'Iron': 0.7, 'Vitamin A': 27, 'Vitamin B12': 5, 'Vitamin D': 10, 'Omega-3s': 1.5, 'Potassium': 400, 'Choline': 60, 'Healthy Fats': 10 } }, // Added Healthy Fats
+                { id: 9, name: 'Banana', emoji: '🍌', price: 5, per: 'unit', nutrients: { 'Calories': 89, 'Protein': 1.1, 'Fiber': 2.6, 'Potassium': 358, 'Magnesium': 27 } },
+                { id: 10, name: 'Yogurt (Curd)', emoji: '🍦', price: 10, per: '100g', nutrients: { 'Calories': 59, 'Protein': 10, 'Calcium': 110, 'Sodium': 35, 'Vitamin B12': 0.7, 'Potassium': 141, 'Choline': 15 } },
+                { id: 11, name: 'Whole Wheat Flour', emoji: '🌾', price: 5, per: '100g', nutrients: { 'Calories': 340, 'Protein': 13, 'Fiber': 11, 'Iron': 3.6, 'Magnesium': 137, 'Zinc': 2.6, 'Potassium': 363, 'Carbohydrate Quality': 0.8 } },
+                { id: 12, name: 'Tomato', emoji: '🍅', price: 4, per: '100g', nutrients: { 'Calories': 18, 'Vitamin C': 14, 'Fiber': 1.2, 'Vitamin A': 42, 'Potassium': 237, 'Folic Acid': 15 } }, // Added Folic Acid
+                { id: 13, name: 'Eggs', emoji: '🥚', price: 7, per: 'unit', nutrients: { 'Calories': 78, 'Protein': 6.3, 'Iron': 0.7, 'Vitamin A': 75, 'Vitamin B12': 0.5, 'Vitamin D': 1.1, 'Choline': 147, 'Healthy Fats': 5 } },
+                { id: 14, name: 'Chicken', emoji: '🍗', price: 25, per: '100g', nutrients: { 'Calories': 165, 'Protein': 31, 'Iron': 1.5, 'Vitamin B12': 0.3, 'Zinc': 0.9, 'Potassium': 250, 'Choline': 60, 'Healthy Fats': 5 } },
+                { id: 15, name: 'Okra (Bendakaya)', emoji: '💚', price: 3, per: '100g', nutrients: { 'Calories': 33, 'Fiber': 3.2, 'Vitamin C': 23, 'Potassium': 299, 'Magnesium': 57 } },
+                { id: 16, name: 'Groundnuts (Palli)', emoji: '🥜', price: 15, per: '100g', nutrients: { 'Calories': 567, 'Protein': 26, 'Fiber': 8.5, 'Iron': 4.6, 'Magnesium': 168, 'Zinc': 3.3, 'Potassium': 705, 'Healthy Fats': 49, 'Carbohydrate Quality': 0.7 } },
+                { id: 17, name: 'Gongura Leaves', emoji: '🌿', price: 4, per: '100g', nutrients: { 'Calories': 32, 'Iron': 3.2, 'Vitamin C': 28, 'Vitamin A': 1000, 'Calcium': 395, 'Magnesium': 57, 'Potassium': 300, 'Folic Acid': 150 } }, // Added Folic Acid
+                { id: 18, name: 'Paneer', emoji: '🧀', price: 30, per: '100g', nutrients: { 'Calories': 265, 'Protein': 18, 'Calcium': 200, 'Healthy Fats': 21 } },
+                { id: 19, name: 'Poha (Flattened Rice)', emoji: '🥣', price: 7, per: '100g', nutrients: { 'Calories': 346, 'Protein': 7, 'Iron': 3.5, 'Fiber': 1, 'Carbohydrate Quality': 0.7 } },
+                { id: 20, name: 'Cucumber', emoji: '🥒', price: 3, per: '100g', nutrients: { 'Calories': 15, 'Fiber': 0.7, 'Vitamin C': 3, 'Potassium': 147 } },
+                { id: 21, name: 'Walnuts', emoji: '🌰', price: 40, per: '50g', nutrients: { 'Calories': 327, 'Protein': 7.3, 'Fiber': 3.4, 'Omega-3s': 6.8, 'Magnesium': 78, 'Healthy Fats': 30, 'Potassium': 220 } },
+                { id: 22, name: 'Brown Rice', emoji: '🍚', price: 8, per: '100g', nutrients: { 'Calories': 111, 'Protein': 2.6, 'Fiber': 1.8, 'Magnesium': 43, 'Potassium': 84, 'Carbohydrate Quality': 0.9 } } // Added Brown Rice
+            ]
+        };
+
+        let gameState = {};
+        let nutrientChart = null;
+
+        function initialize() {
+            renderPersonaCards();
+        }
+
+        function showScreen(screenId) {
+            document.getElementById('welcome-screen').classList.add('hidden');
+            document.getElementById('persona-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.add('hidden');
+            document.getElementById(screenId).classList.remove('hidden');
+        }
+
+        function renderPersonaCards() {
+            const container = document.getElementById('persona-cards');
+            container.innerHTML = appData.personas.map(p => `
+                <div class="food-card bg-white p-6 rounded-lg shadow-md border border-stone-200 cursor-pointer" onclick="selectPersona(${p.id})">
+                    <div class="text-5xl mb-3 text-center">${p.emoji}</div>
+                    <h3 class="text-2xl font-bold text-emerald-700 mb-2 text-center">${p.name}</h3>
+                    <p class="text-stone-600 text-sm">${p.details}</p>
+                    <p class="text-stone-600 mt-2 text-center"><span class="font-semibold">Budget:</span> ₹${p.budget}</p>
+                </div>
+            `).join('');
+        }
+        
+        function restartGame() {
+            showScreen('persona-screen');
+        }
+
+        function showPersonaScreen() {
+            showScreen('persona-screen');
+        }
+
+        function selectPersona(id) {
+            const persona = appData.personas.find(p => p.id === id);
+            gameState = {
+                persona: persona,
+                basket: [],
+                totalCost: 0,
+                nutrients: {}
+            };
+            // Initialize all possible nutrients to 0, not just persona's needs, for broader tracking
+            const allNutrients = new Set();
+            appData.market.forEach(item => {
+                Object.keys(item.nutrients).forEach(nutrient => allNutrients.add(nutrient));
+            });
+            allNutrients.forEach(key => gameState.nutrients[key] = 0);
+
+            // Ensure persona's specific needs are also explicitly initialized
+            Object.keys(persona.needs).forEach(key => {
+                if (!(key in gameState.nutrients)) {
+                    gameState.nutrients[key] = 0;
+                }
+            });
+            
+            renderGameScreen();
+            showScreen('game-screen');
+        }
+
+        function renderGameScreen() {
+            renderMarket();
+            updateBasket();
+            updateAnalysis();
+
+            const persona = gameState.persona;
+            document.getElementById('persona-name').textContent = persona.name;
+            document.getElementById('persona-details').innerHTML = `<p>${persona.details}</p>`;
+            
+            const deficiency = appData.deficiencies[persona.deficiency];
+            document.getElementById('deficiency-symptom').textContent = deficiency.symptom;
+        }
+
+        function renderMarket() {
+            const container = document.getElementById('market-items');
+            container.innerHTML = appData.market.map(item => `
+                <div class="food-card bg-stone-50 p-3 rounded-lg border border-stone-200 cursor-pointer" onclick="addToBasket(${item.id})">
+                    <div class="text-3xl mb-2">${item.emoji}</div>
+                    <div class="font-semibold">${item.name}</div>
+                    <div class="text-sm text-stone-500">₹${item.price} / ${item.per}</div>
+                </div>
+            `).join('');
+        }
+
+        function addToBasket(itemId) {
+            const item = appData.market.find(i => i.id === itemId);
+            gameState.basket.push(item);
+            updateBasket();
+            updateAnalysis();
+        }
+
+        function removeFromBasket(index) {
+            gameState.basket.splice(index, 1);
+            updateBasket();
+            updateAnalysis();
+        }
+
+        function updateBasket() {
+            const container = document.getElementById('basket-items');
+            if (gameState.basket.length === 0) {
+                container.innerHTML = `<p class="text-stone-500 italic">Your basket is empty. Add items from the market.</p>`;
+            } else {
+                container.innerHTML = gameState.basket.map((item, index) => `
+                    <div class="flex justify-between items-center bg-stone-50 p-2 rounded-lg border border-stone-200">
+                        <div>
+                            <span class="text-xl">${item.emoji}</span>
+                            <span class="font-medium ml-2">${item.name}</span>
+                        </div>
+                        <div>
+                            <span class="text-stone-600 mr-4">₹${item.price}</span>
+                            <button onclick="removeFromBasket(${index})" class="text-red-500 font-bold hover:text-red-700">×</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function updateAnalysis() {
+            gameState.totalCost = gameState.basket.reduce((sum, item) => sum + item.price, 0);
+
+            // Reset nutrients to 0 before recalculating
+            Object.keys(gameState.nutrients).forEach(key => gameState.nutrients[key] = 0);
+
+            gameState.basket.forEach(item => {
+                for (const [key, value] of Object.entries(item.nutrients)) {
+                    if (key in gameState.nutrients) { // Only add if the nutrient is tracked
+                        gameState.nutrients[key] += value;
+                    }
+                }
+            });
+
+            const budget = gameState.persona.budget;
+            const cost = gameState.totalCost;
+            const budgetTracker = document.getElementById('budget-tracker');
+            budgetTracker.innerHTML = `₹${cost} <span class="text-lg text-stone-500">/ ₹${budget}</span>`;
+            budgetTracker.classList.toggle('text-red-600', cost > budget);
+            
+            const analysisContainer = document.getElementById('nutrient-analysis');
+            analysisContainer.innerHTML = Object.keys(gameState.persona.needs).map(key => {
+                const need = gameState.persona.needs[key];
+                const current = Math.round(gameState.nutrients[key] || 0); // Use 0 if nutrient not in basket
+                let percentage = (current / need.target) * 100;
+                
+                // Special handling for 'Carbohydrate Quality' if it's a ratio, not an accumulating value
+                if (key === 'Carbohydrate Quality') {
+                    // This is a simplified approach. We'll assume a target average quality of 0.8 for visualization.
+                    // The 'current' value for Carb Quality is the sum of qualities.
+                    const carbQualityItems = gameState.basket.filter(item => item.nutrients && item.nutrients['Carbohydrate Quality'] !== undefined);
+                    const averageQuality = carbQualityItems.length > 0 ? (current / carbQualityItems.length) : 0;
+                    percentage = (averageQuality / 0.8) * 100; // Visualizing against an ideal average of 0.8
+                }
+                percentage = Math.min(100, percentage); // Cap at 100% for bar visualization
+                
+                return `
+                    <div>
+                        <div class="flex justify-between text-sm mb-1">
+                            <span class="font-semibold">${key}</span>
+                            <span>${current} / ${need.target} ${need.unit}</span>
+                        </div>
+                        <div class="w-full nutrient-bar-bg rounded-full h-2.5">
+                            <div class="bg-emerald-600 h-2.5 rounded-full nutrient-bar-fill" style="width: ${percentage}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('submit-button').disabled = gameState.basket.length === 0;
+        }
+
+        function submitPlan() {
+            const { persona, totalCost, nutrients } = gameState;
+            const deficiency = appData.deficiencies[persona.deficiency];
+            
+            let score = 0;
+            let nutritionScore = 0;
+            const maxNutritionScore = 20;
+            let budgetScore = 0;
+            let deficiencyScore = 0;
+            
+            let nutritionFeedback = '<h4>Nutritional Adequacy (20 pts):</h4><ul>';
+            const numNeeds = Object.keys(persona.needs).length;
+            Object.entries(persona.needs).forEach(([key, value]) => {
+                const current = nutrients[key] || 0;
+                const target = value.target;
+                let achievedRatio = current / target;
+                let point = 0;
+
+                if (key === 'Carbohydrate Quality') {
+                    const carbQualityItems = gameState.basket.filter(item => item.nutrients && item.nutrients['Carbohydrate Quality'] !== undefined);
+                    const averageQuality = carbQualityItems.length > 0 ? (current / carbQualityItems.length) : 0;
+                    if (averageQuality >= 0.7) { // Assuming 0.7 is a good average quality for points
+                        point = maxNutritionScore / numNeeds;
+                        nutritionFeedback += `<li class="text-emerald-700">✓ Good! You focused on ${key} (Avg. Quality: ${averageQuality.toFixed(1)}).</li>`;
+                    } else if (averageQuality >= 0.5) {
+                        point = (maxNutritionScore / numNeeds) * 0.5;
+                        nutritionFeedback += `<li class="text-amber-700">! Partially met the ${key} goal (Avg. Quality: ${averageQuality.toFixed(1)}).</li>`;
+                    } else {
+                        nutritionFeedback += `<li class="text-red-700">✗ The ${key} goal was not sufficiently met (Avg. Quality: ${averageQuality.toFixed(1)}).</li>`;
+                    }
+                } else if (achievedRatio >= 0.9) {
+                    point = maxNutritionScore / numNeeds;
+                    nutritionFeedback += `<li class="text-emerald-700">✓ Well done! You met the ${key} goal.</li>`;
+                } else if (achievedRatio >= 0.6) {
+                    point = (maxNutritionScore / numNeeds) * 0.5;
+                    nutritionFeedback += `<li class="text-amber-700">! Partially met the ${key} goal.</li>`;
+                } else {
+                    nutritionFeedback += `<li class="text-red-700">✗ The ${key} goal was not met.</li>`;
+                }
+                nutritionScore += point;
+            });
+            nutritionFeedback += '</ul>';
+            score += Math.round(nutritionScore);
+
+            let budgetFeedback = '<h4>Budget Management (10 pts):</h4>';
+            if (totalCost > persona.budget) {
+                budgetScore = 0;
+                budgetFeedback += `<p class="text-red-700">✗ You went over budget by ₹${totalCost - persona.budget}.</p>`;
+            } else {
+                budgetScore = 10;
+                budgetFeedback += `<p class="text-emerald-700">✓ Excellent! You stayed within budget, saving ₹${persona.budget - totalCost}.</p>`;
+            }
+            score += budgetScore;
+
+            let deficiencyFeedback = `<h4>Deficiency Puzzle (10 pts):</h4>`;
+            const requiredNutrient = deficiency.nutrient;
+            const targetForDeficiency = Object.entries(persona.needs).find(([key]) => key === requiredNutrient);
+            
+            let deficiencyMet = false;
+            if (requiredNutrient === 'Carbohydrate Quality') {
+                const carbQualityItems = gameState.basket.filter(item => item.nutrients && item.nutrients['Carbohydrate Quality'] !== undefined);
+                const averageQuality = carbQualityItems.length > 0 ? (nutrients[requiredNutrient] / carbQualityItems.length) : 0;
+                if (averageQuality >= 0.7) { // Check against the same threshold for consistency
+                    deficiencyMet = true;
+                }
+            } else if (targetForDeficiency && (nutrients[requiredNutrient] || 0) >= targetForDeficiency[1].target * 0.9) {
+                deficiencyMet = true;
+            }
+
+            if (deficiencyMet) {
+                deficiencyScore = 10;
+                deficiencyFeedback += `<p class="text-emerald-700">✓ Great job! You correctly addressed the ${requiredNutrient} deficiency.</p>`;
+            } else {
+                deficiencyFeedback += `<p class="text-red-700">✗ The plan didn't sufficiently address the ${requiredNutrient} deficiency for ${deficiency.symptom}.</p>`;
+            }
+            score += deficiencyScore;
+
+            const modalContent = document.getElementById('modal-content-area');
+            modalContent.innerHTML = `
+                <div class="text-center mb-6">
+                    <h2 class="text-3xl font-bold">Your Results</h2>
+                    <p class="text-5xl font-bold text-emerald-700 mt-2">${score} / 40</p>
+                    <p class="text-stone-600">Total Score</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <div class="p-4 bg-stone-50 rounded-lg border">${nutritionFeedback}</div>
+                        <div class="p-4 bg-stone-50 rounded-lg border">${budgetFeedback}</div>
+                        <div class="p-4 bg-stone-50 rounded-lg border">${deficiencyFeedback}</div>
+                    </div>
+                    <div class="bg-stone-50 p-4 rounded-lg border flex items-center justify-center">
+                        <div class="chart-container relative h-80 sm:h-96 w-full max-w-md mx-auto">
+                            <canvas id="nutrient-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-center mt-8">
+                    <button onclick="getAIDietitianReview()" class="bg-blue-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-blue-700 transition-colors mr-4">✨ Get AI Dietitian's Review</button>
+                    <button onclick="closeModal()" class="bg-emerald-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-emerald-700 transition-colors">Try Again</button>
+                </div>
+                <div id="ai-review-section" class="mt-8 p-4 bg-blue-50 rounded-lg border border-blue-200 hidden">
+                    <h3 class="text-xl font-bold text-blue-800 mb-4">AI Dietitian's Review</h3>
+                    <div id="ai-review-content" class="text-blue-700">
+                        <p class="text-center animate-pulse">Generating review...</p>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('scoring-modal').classList.add('active');
+            renderChart();
+        }
+
+        async function getAIDietitianReview() {
+            const reviewSection = document.getElementById('ai-review-section');
+            const reviewContent = document.getElementById('ai-review-content');
+            reviewSection.classList.remove('hidden');
+            reviewContent.innerHTML = '<p class="text-center animate-pulse">Generating review...</p>';
+
+            const { persona, totalCost, nutrients, basket } = gameState;
+            const deficiency = appData.deficiencies[persona.deficiency];
+
+            const basketDetails = basket.map(item => `${item.name} (₹${item.price})`).join(', ');
+            const nutrientDetails = Object.entries(nutrients).map(([key, value]) => {
+                const personaNeed = persona.needs[key];
+                if (personaNeed) {
+                    return `${key}: ${Math.round(value)} ${personaNeed.unit} (Target: ${personaNeed.target} ${personaNeed.unit})`;
+                }
+                return `${key}: ${Math.round(value)}`; // Fallback if target not defined
+            }).join(', ');
+
+            const prompt = `As a Public Health Expert and Dietitian, review the following meal plan for a game participant.
+Persona: ${persona.name} - ${persona.details}. Key Nutritional Needs: ${JSON.stringify(persona.needs)}. Specific Deficiency/Focus: ${deficiency.symptom} (requiring ${deficiency.nutrient}).
+Submitted Basket Items: ${basketDetails}.
+Total Cost: ₹${totalCost}, Budget: ₹${persona.budget}.
+Nutrients Achieved: ${nutrientDetails}.
+
+Provide a concise, qualitative assessment focusing on:
+1.  How well the chosen items align with the persona's general nutritional needs, considering the specific targets.
+2.  How effectively the plan addresses the specified deficiency/focus (e.g., Iron Deficiency Anemia, Blood Sugar Fluctuation, Stress & Energy Metabolism, Bone Development Issues, Immune Function Decline, Electrolyte Imbalance, Cognitive Performance, Infant Brain Development, Cardiovascular Health). For "Carbohydrate Quality," assess if the chosen carb sources are generally low GI and complex.
+3.  Practicality and cultural appropriateness given the persona's demographic and context (e.g., low-income, busy schedule, rural setting, chewing difficulties).
+4.  Suggestions for improvement, especially if goals were missed, budget was exceeded, or the plan could be more balanced.
+5.  Suggest simple, practical meal ideas from the basket items for a one-day plan.
+Format your response as a clear, readable text, focusing on constructive feedback. Do not include any introductory or concluding remarks outside the review itself.`;
+
+            try {
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    reviewContent.innerHTML = `<p>${text.replace(/\n/g, '<br>')}</p>`; // Preserve newlines
+                } else {
+                    reviewContent.innerHTML = '<p class="text-red-600">Error: Could not get a review from the AI dietitian. Please try again.</p>';
+                }
+            } catch (error) {
+                console.error('Error fetching AI review:', error);
+                reviewContent.innerHTML = '<p class="text-red-600">Error: Failed to connect to the AI dietitian. Please check your network connection.</p>';
+            }
+        }
+
+
+        function renderChart() {
+            const { persona, nutrients } = gameState;
+            const ctx = document.getElementById('nutrient-chart').getContext('2d');
+            
+            const labels = Object.keys(persona.needs);
+            // Normalize target data to 100 for radar chart comparison
+            const targetData = labels.map(key => 100); 
+            // Calculate achieved percentage of target for each nutrient
+            const achievedData = labels.map(key => {
+                const need = persona.needs[key];
+                const current = nutrients[key] || 0; // Ensure current is 0 if not present
+                
+                if (key === 'Carbohydrate Quality') {
+                    const carbQualityItems = gameState.basket.filter(item => item.nutrients && item.nutrients['Carbohydrate Quality'] !== undefined);
+                    const averageQuality = carbQualityItems.length > 0 ? (current / carbQualityItems.length) : 0;
+                    return (averageQuality / 0.8) * 100; // Visualizing against an ideal average of 0.8
+                }
+                return (current / need.target) * 100;
+            });
+            
+            if (nutrientChart) {
+                nutrientChart.destroy();
+            }
+
+            nutrientChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Target Goal',
+                            data: targetData,
+                            borderColor: 'rgba(239, 68, 68, 0.5)',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            borderWidth: 1,
+                        },
+                        {
+                            label: 'Your Basket',
+                            data: achievedData,
+                            borderColor: 'rgba(5, 150, 105, 1)',
+                            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                            borderWidth: 2,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            angleLines: { color: 'rgba(0, 0, 0, 0.1)' },
+                            grid: { color: 'rgba(0, 0, 0, 0.1)' },
+                            pointLabels: { font: { size: 12 } },
+                            suggestedMin: 0,
+                            suggestedMax: 120, // Max for percentage, allowing slight overage visually
+                            ticks: {
+                                backdropColor: 'rgba(255, 255, 255, 1)',
+                                callback: function(value) {
+                                    return value + '%'
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label;
+                                    const personaNeed = persona.needs[label];
+                                    const actualAchieved = Math.round((nutrients[label] || 0) * 100) / 100; // Round for display
+                                    
+                                    if (label === 'Carbohydrate Quality') {
+                                        const carbQualityItems = gameState.basket.filter(item => item.nutrients && item.nutrients['Carbohydrate Quality'] !== undefined);
+                                        const averageQuality = carbQualityItems.length > 0 ? (actualAchieved / carbQualityItems.length).toFixed(1) : 'N/A';
+                                        return `${context.dataset.label}: Avg. Quality ${averageQuality} (Higher is better)`;
+                                    }
+                                    const targetValue = personaNeed.target;
+                                    const unit = personaNeed.unit;
+                                    return `${context.dataset.label}: ${actualAchieved} ${unit} / ${targetValue} ${unit}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function closeModal() {
+            document.getElementById('scoring-modal').classList.remove('active');
+            if (nutrientChart) {
+                nutrientChart.destroy();
+                nutrientChart = null;
+            }
+            // Hide the AI review section when modal is closed
+            document.getElementById('ai-review-section').classList.add('hidden');
+            restartGame();
+        }
+
+        window.onload = initialize;
+    </script>
+
+</body>
+</html>
+?
